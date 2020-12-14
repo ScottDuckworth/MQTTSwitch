@@ -19,8 +19,9 @@
 
 #define BUTTON_PIN 13
 #define POWER_PIN 17
-#define STATUS_LED 2
+#define STATUS_LED LED_BUILTIN
 #define SETTINGS_HEADER 0xD2
+#define DEBOUNCE_MILLIS 50
 
 struct Settings {
   uint8_t header = SETTINGS_HEADER;
@@ -40,8 +41,8 @@ Settings settings;
 BluetoothSerial bt;
 WiFiClient wifi_client;
 PubSubClient mqtt(wifi_client);
-bool power_enable = false;
-bool bluetooth_enable = false;
+volatile bool power_enable = false;
+volatile bool bluetooth_enable = false;
 unsigned long bluetooth_enable_millis;
 unsigned long wifi_last_try;
 unsigned long mqtt_last_try;
@@ -314,43 +315,32 @@ void PollBluetoothCommand() {
   }
 }
 
-void PollButton() {
-  static int prev_button = -1;
-  static unsigned long button_press_millis = 0;
-  int button = digitalRead(BUTTON_PIN);
-  if (prev_button != button) {
-    prev_button = button;
-    // Momentary button press to turn on/off.
-    if (button == LOW) {
-      button_press_millis = millis();
-    } else if (button_press_millis > 0) {
-      unsigned long hold_millis = millis() - button_press_millis;
-      button_press_millis = 0;
-      // Debounce for 10ms.
-      if (hold_millis >= 10) {
-        power_enable = !power_enable;
-      }
+void ButtonChangeISR() {
+  static volatile bool button_press = false;
+  static volatile unsigned long button_press_millis = 0;
+  unsigned long now = millis();
+  if (digitalRead(BUTTON_PIN) == LOW) {
+    if (!button_press) {
+      button_press = true;
+      button_press_millis = now;
     }
-  } else if (button == LOW && button_press_millis > 0 &&
-             millis() - button_press_millis >= 5000) {
-    // Hold for 5 seconds to enable/disable Bluetooth.
-    button_press_millis = 0;
-    if (bluetooth_enable) {
-      bluetooth_enable = false;
-      bt.end();
-      Serial.println("Bluetooth disabled.");
-    } else {
-      bluetooth_enable = true;
-      bluetooth_enable_millis = millis();
-      bt.begin(settings.device_name);
-      Serial.print("Bluetooth enabled; name: ");
-      Serial.print(settings.device_name);
-      Serial.println(".");
+  } else {
+    if (button_press) {
+      button_press = false;
+      unsigned long hold_millis = now - button_press_millis;
+      if (hold_millis >= 5000) {
+        // Toggle Bluetooth.
+        bluetooth_enable = !bluetooth_enable;
+      } else if (hold_millis >= DEBOUNCE_MILLIS) {
+        // Toggle power.
+        power_enable = !power_enable;
+        digitalWrite(POWER_PIN, power_enable);
+      }
     }
   }
 }
 
-void mqttCallback(char* topic, byte* payload, unsigned int length) {
+void MQTTCallback(char* topic, byte* payload, unsigned int length) {
   if (strncmp(topic, settings.mqtt_control_topic, sizeof(settings.mqtt_control_topic)) == 0) {
     char str[8] = {0};
     memcpy(str, payload, std::min(length, sizeof(str) - 1));
@@ -369,15 +359,30 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 void loop() {
   static unsigned long last_blink = 0;
   static unsigned long blink_delay = 0;
-  PollButton();
+  static bool last_power_enable = power_enable;
+  static bool last_bluetooth_enable = bluetooth_enable;
+  static bool last_bluetooth_has_client = false;
+
+  if (bluetooth_enable != last_bluetooth_enable) {
+    last_bluetooth_enable = bluetooth_enable;
+    if (bluetooth_enable) {
+      bluetooth_enable_millis = millis();
+      bt.begin(settings.device_name);
+      Serial.print("Bluetooth enabled; name: ");
+      Serial.print(settings.device_name);
+      Serial.println(".");
+    } else {
+      bt.end();
+      Serial.println("Bluetooth disabled.");
+    }
+  }
   
   if (bluetooth_enable) {
     PollBluetoothCommand();
-    static bool last_has_client = false;
-    bool has_client = bt.hasClient();
-    if (has_client != last_has_client) {
-      last_has_client = has_client;
-      if (has_client) {
+    bool bluetooth_has_client = bt.hasClient();
+    if (bluetooth_has_client != last_bluetooth_has_client) {
+      last_bluetooth_has_client = bluetooth_has_client;
+      if (bluetooth_has_client) {
         Serial.println("Bluetooth client connected.");
         PrintHelp();
       } else {
@@ -385,16 +390,16 @@ void loop() {
       }
     }
     // Disable bluetooth after 10 minutes.
-    if (!has_client && millis() - bluetooth_enable_millis >= 600000) {
-      bt.end();
-      Serial.println("Bluetooth disabled after timeout.");
+    if (!bluetooth_has_client && millis() - bluetooth_enable_millis >= 600000) {
+      bluetooth_enable = false;
+      Serial.println("Bluetooth timeout.");
     }
   }
   
   if (EnsureWiFi()) {
     if (EnsureMQTT()) {
       mqtt.loop();
-      blink_delay = 0;
+      blink_delay = 5000;
     } else {
       blink_delay = 1000;
     }
@@ -409,7 +414,6 @@ void loop() {
     digitalWrite(STATUS_LED, !digitalRead(STATUS_LED));
   }
   
-  static bool last_power_enable = power_enable;
   if (power_enable != last_power_enable) {
     last_power_enable = power_enable;
     digitalWrite(POWER_PIN, power_enable);
@@ -422,6 +426,7 @@ void setup() {
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   pinMode(POWER_PIN, OUTPUT);
   pinMode(STATUS_LED, OUTPUT);
+  attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), ButtonChangeISR, CHANGE);
   
   Serial.begin(115200);
   
@@ -440,5 +445,5 @@ void setup() {
   // I've had endless troubles with the async MQTT client found at
   // https://github.com/marvinroger/async-mqtt-client :-(.
   mqtt.setSocketTimeout(5);
-  mqtt.setCallback(mqttCallback);
+  mqtt.setCallback(MQTTCallback);
 }
