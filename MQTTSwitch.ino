@@ -20,7 +20,7 @@
 #define BUTTON_PIN 15
 #define POWER_PIN 4
 #define STATUS_LED LED_BUILTIN
-#define SETTINGS_HEADER 0xD2
+#define SETTINGS_HEADER 0xD3
 #define DEBOUNCE_MILLIS 50
 
 struct Settings {
@@ -32,7 +32,7 @@ struct Settings {
   uint16_t mqtt_port = 1883;
   char mqtt_id[16] = "";
   char mqtt_user[16] = "";
-  char mqtt_password[16] = "";
+  char mqtt_password[32] = "";
   char mqtt_control_topic[32] = "";
   char mqtt_status_topic[32] = "";
 };
@@ -164,13 +164,13 @@ bool EnsureMQTT(const Settings& mysettings = settings) {
     mqtt.setServer(mysettings.mqtt_server, mysettings.mqtt_port);
     const char* id = mysettings.mqtt_id;
     if (strlen(id) == 0) id = mysettings.device_name;
-    bool success;
-    if (strlen(mysettings.mqtt_user) == 0) {
-      success = mqtt.connect(id, mysettings.mqtt_status_topic, 1, true, "OFFLINE");
-    } else {
-      success = mqtt.connect(id, mysettings.mqtt_user, mysettings.mqtt_password,
-                             mysettings.mqtt_status_topic, 1, true, "OFFLINE");
-    }
+    const char* user = mysettings.mqtt_user;
+    if (strlen(user) == 0) user = nullptr;
+    const char* password = mysettings.mqtt_password;
+    if (strlen(password) == 0) password = nullptr;
+    const char* status_topic = mysettings.mqtt_status_topic;
+    if (strlen(status_topic) == 0) status_topic = nullptr;
+    bool success = mqtt.connect(id, user, password, status_topic, 1, true, "OFFLINE");
     if (success && strlen(mysettings.mqtt_control_topic) > 0) {
       mqtt.subscribe(mysettings.mqtt_control_topic, 1);
     }
@@ -224,9 +224,12 @@ bool BluetoothReadLine(char* line, size_t linesize, bool strip = true) {
   size_t i = 0;
   int c;
   memset(line, 0, linesize);
-  while ((c = bt.read()) != '\n') {
+  while (bt.hasClient()) {
+    int c = bt.read();
     if (c < 0) {
       yield();
+    } else if (c == '\n') {
+      break;
     } else if (i < linesize - 1) {
       line[i++] = c;
     }
@@ -244,10 +247,11 @@ bool Setup() {
   bt.println("WiFi password:");
   BluetoothReadLine(mysettings.wifi_password, sizeof(mysettings.wifi_password));
 
+  if (!bt.hasClient()) return false;
   bt.print("Connecting to WiFi... ");
   EnsureWiFi(mysettings);
   unsigned long start = millis();
-  while (true) {
+  while (bt.hasClient()) {
     wl_status_t status = WiFi.status();
     if (status == WL_CONNECTED) break;
     if (status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL) {
@@ -271,10 +275,12 @@ bool Setup() {
     BluetoothReadLine(mysettings.mqtt_password, sizeof(mysettings.mqtt_user));
   }
 
+  if (!bt.hasClient()) return false;
   bt.print("Connecting to MQTT server... ");
   EnsureMQTT(mysettings);
   start = millis();
-  while(true) {
+  while (bt.hasClient()) {
+    mqtt.loop();
     int state = mqtt.state();
     if (state == MQTT_CONNECTED) break;
     if (state == MQTT_CONNECT_FAILED || state == MQTT_CONNECT_UNAUTHORIZED) {
@@ -545,7 +551,6 @@ void setup() {
     Serial.println("Found invalid settings header; settings reset.");
   }
 
-    
   // Set a short timeout because this is a blocking MQTT client.
   // I've had endless troubles with the async MQTT client found at
   // https://github.com/marvinroger/async-mqtt-client :-(.
