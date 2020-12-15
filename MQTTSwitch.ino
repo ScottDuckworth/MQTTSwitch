@@ -508,6 +508,7 @@ void loop() {
   } else {
     // Blink every 10 seconds if WiFi and MQTT are connected.
     blink_period = 10000;
+    mqtt.loop();
   }
 
   unsigned long blink_duration = millis() - blink_millis;
