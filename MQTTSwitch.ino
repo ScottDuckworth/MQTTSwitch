@@ -17,8 +17,8 @@
 #include <PubSubClient.h>
 #include <WiFi.h>
 
-#define BUTTON_PIN 13
-#define POWER_PIN 17
+#define BUTTON_PIN 15
+#define POWER_PIN 4
 #define STATUS_LED LED_BUILTIN
 #define SETTINGS_HEADER 0xD2
 #define DEBOUNCE_MILLIS 50
