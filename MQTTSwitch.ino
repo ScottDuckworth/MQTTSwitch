@@ -58,6 +58,7 @@ void PrintHelp() {
   bt.println(" on");
   bt.println(" off");
   bt.println(" status");
+  bt.println(" setup");
   bt.println(" device-name [<name>]");
   bt.println(" mqtt-server [<IPaddr>]");
   bt.println(" mqtt-status");
@@ -117,7 +118,7 @@ void PublishStatus() {
   }
 }
 
-bool EnsureWiFi() {
+bool EnsureWiFi(const Settings& mysettings = settings) {
   static wl_status_t last_status = WL_NO_SHIELD;
   wl_status_t status = WiFi.status();
   if (status != last_status) {
@@ -127,21 +128,21 @@ bool EnsureWiFi() {
     Serial.println(".");
   }
   if (status == WL_CONNECTED) return true;
-  if (strlen(settings.wifi_ssid) == 0) return false;
+  if (strlen(mysettings.wifi_ssid) == 0) return false;
   // Retry connecting every 60 seconds.
   unsigned long now = millis();
   if (wifi_last_try == 0 || now - wifi_last_try >= 60000) {
     wifi_last_try = now;
     Serial.print("Connecting to WiFi SSID ");
-    Serial.print(settings.wifi_ssid);
+    Serial.print(mysettings.wifi_ssid);
     Serial.println(".");
-    WiFi.setHostname(settings.device_name);
-    WiFi.begin(settings.wifi_ssid, settings.wifi_password);
+    WiFi.setHostname(mysettings.device_name);
+    WiFi.begin(mysettings.wifi_ssid, mysettings.wifi_password);
   }
   return false;
 }
 
-bool EnsureMQTT() {
+bool EnsureMQTT(const Settings& mysettings = settings) {
   static int last_state = MQTT_DISCONNECTED;
   int state = mqtt.state();
   if (state != last_state) {
@@ -152,26 +153,26 @@ bool EnsureMQTT() {
     if (state == MQTT_CONNECTED) PublishStatus();
   }
   if (state == MQTT_CONNECTED) return true;
-  if (strlen(settings.mqtt_server) == 0) return false;
+  if (strlen(mysettings.mqtt_server) == 0) return false;
   // Retry connecting every 60 seconds.
   unsigned long now = millis();
   if (mqtt_last_try == 0 || now - mqtt_last_try >= 60000) {
     mqtt_last_try = now;
     Serial.print("Connecting to MQTT server ");
-    Serial.print(settings.mqtt_server);
+    Serial.print(mysettings.mqtt_server);
     Serial.println(".");
-    mqtt.setServer(settings.mqtt_server, settings.mqtt_port);
-    const char* id = settings.mqtt_id;
-    if (strlen(id) == 0) id = settings.device_name;
+    mqtt.setServer(mysettings.mqtt_server, mysettings.mqtt_port);
+    const char* id = mysettings.mqtt_id;
+    if (strlen(id) == 0) id = mysettings.device_name;
     bool success;
-    if (strlen(settings.mqtt_user) == 0) {
-      success = mqtt.connect(id, settings.mqtt_status_topic, 1, true, "OFFLINE");
+    if (strlen(mysettings.mqtt_user) == 0) {
+      success = mqtt.connect(id, mysettings.mqtt_status_topic, 1, true, "OFFLINE");
     } else {
-      success = mqtt.connect(id, settings.mqtt_user, settings.mqtt_password,
-                             settings.mqtt_status_topic, 1, true, "OFFLINE");
+      success = mqtt.connect(id, mysettings.mqtt_user, mysettings.mqtt_password,
+                             mysettings.mqtt_status_topic, 1, true, "OFFLINE");
     }
-    if (success && strlen(settings.mqtt_control_topic) > 0) {
-      mqtt.subscribe(settings.mqtt_control_topic, 1);
+    if (success && strlen(mysettings.mqtt_control_topic) > 0) {
+      mqtt.subscribe(mysettings.mqtt_control_topic, 1);
     }
     return success;
   }
@@ -209,6 +210,97 @@ bool SettingsReadWriteHelper(char* settings_value, size_t size, const char* new_
   }
 }
 
+void StrStrip(char* str) {
+  char* in = str;
+  char* out = str;
+  while (*in && isspace(*in)) ++in;
+  while (*in) *out++ = *in++;
+  do {
+    *out-- = '\0';
+  } while (out >= str && isspace(*out));
+}
+
+bool BluetoothReadLine(char* line, size_t linesize, bool strip = true) {
+  size_t i = 0;
+  int c;
+  memset(line, 0, linesize);
+  while ((c = bt.read()) != '\n') {
+    if (c < 0) {
+      yield();
+    } else if (i < linesize - 1) {
+      line[i++] = c;
+    }
+  }
+  if (strip) StrStrip(line);
+  return i > 0;
+}
+
+bool Setup() {
+  Settings mysettings = settings;
+  RestartWiFi();
+  
+  bt.println("WiFi SSID:");
+  BluetoothReadLine(mysettings.wifi_ssid, sizeof(mysettings.wifi_ssid));
+  bt.println("WiFi password:");
+  BluetoothReadLine(mysettings.wifi_password, sizeof(mysettings.wifi_password));
+
+  bt.print("Connecting to WiFi... ");
+  EnsureWiFi(mysettings);
+  unsigned long start = millis();
+  while (true) {
+    wl_status_t status = WiFi.status();
+    if (status == WL_CONNECTED) break;
+    if (status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL) {
+      bt.println("Connection failed!");
+      return false;
+    }
+    if (millis() - start >= 30000) {
+      bt.println("Timed out!");
+      return false;
+    }
+    yield();
+  }
+  bt.println("Connected!");
+  
+  bt.println("MQTT server:");
+  BluetoothReadLine(mysettings.mqtt_server, sizeof(mysettings.mqtt_server));
+  bt.println("MQTT user:");
+  BluetoothReadLine(mysettings.mqtt_user, sizeof(mysettings.mqtt_user));
+  if (strlen(mysettings.mqtt_user) > 0) {
+    bt.println("MQTT password:");
+    BluetoothReadLine(mysettings.mqtt_password, sizeof(mysettings.mqtt_user));
+  }
+
+  bt.print("Connecting to MQTT server... ");
+  EnsureMQTT(mysettings);
+  start = millis();
+  while(true) {
+    int state = mqtt.state();
+    if (state == MQTT_CONNECTED) break;
+    if (state == MQTT_CONNECT_FAILED || state == MQTT_CONNECT_UNAUTHORIZED) {
+      bt.println("Connection failed!");
+      return false;      
+    }
+    if (millis() - start >= 30000) {
+      bt.println("Timed out!");
+      return false;
+    }
+    yield();
+  }
+  bt.println("Connected!");
+  
+  bt.println("MQTT control topic:");
+  BluetoothReadLine(mysettings.mqtt_control_topic, sizeof(mysettings.mqtt_control_topic));
+  bt.println("MQTT status topic:");
+  BluetoothReadLine(mysettings.mqtt_status_topic, sizeof(mysettings.mqtt_status_topic));
+
+  settings = mysettings;
+  SaveSettings();
+  bt.println("Settings saved!");
+  RestartMQTT();
+  return true;
+}
+
 void PollBluetoothCommand() {
   if (bt.available()) {
     String input = bt.readStringUntil('\n');
@@ -224,6 +316,10 @@ void PollBluetoothCommand() {
       power_enable = false;
     } else if (strcmp(cmd, "status") == 0) {
       bt.println(power_enable ? "on" : "off");
+    } else if (strcmp(cmd, "setup") == 0) {
+      if (!Setup()) {
+        bt.println("Setup failed! Try again.");
+      }
     } else if (strcmp(cmd, "device-name") == 0) {
       char* name = tokenSplit(ptr);
       if (SettingsReadWriteHelper(settings.device_name, sizeof(settings.device_name), name)) {
