@@ -1,3 +1,5 @@
+# MQTTSwitch
+
 MQTTSwitch implements a power switch which is controlled by either a momentary
 switch button, a MQTT topic, or through a Bluetooth serial command line
 interface.
@@ -6,7 +8,7 @@ The code is an Arduino sketch written for ESP32/Node32s, but it should easily
 adapt to other boards. The original use case is to use home automation tools
 to control non-smart devices with a relay.
 
-= Setup =
+## Setup
 
 1. Press and hold the power button for at least 5 seconds, then release. This
    temporarily enables Bluetooth.
@@ -15,7 +17,7 @@ to control non-smart devices with a relay.
 3. Open a Bluetooth serial emulator on your smartphone.
 4. Enter `setup`. Follow the prompts to configure WiFi and MQTT.
 
-= MQTT Topics =
+## MQTT Topics
 
 Two MQTT topics are used:
 
@@ -26,7 +28,7 @@ Two MQTT topics are used:
   `ON`, `OFF`, or `OFFLINE`. The `OFFLINE` status is set by an MQTT will in
   the case that the device goes offline.
 
-= Design Goals =
+## Design Goals
 
 * Pressing the physical power button should *always* instantly toggle the
   power. Reporting power status and responding to MQTT messages comes second.
