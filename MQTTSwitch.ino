@@ -43,7 +43,6 @@ WiFiClient wifi_client;
 PubSubClient mqtt(wifi_client);
 volatile bool power_enable = false;
 volatile bool bluetooth_enable = false;
-unsigned long bluetooth_enable_millis;
 unsigned long wifi_last_try;
 unsigned long mqtt_last_try;
 
@@ -468,6 +467,7 @@ void MQTTCallback(char* topic, byte* payload, unsigned int length) {
 void loop() {
   static unsigned long blink_millis = 0;
   static unsigned long blink_period = 0;
+  static unsigned long bluetooth_disconnected_millis = 0;
   static bool last_power_enable = power_enable;
   static bool last_bluetooth_enable = bluetooth_enable;
   static bool last_bluetooth_has_client = false;
@@ -475,7 +475,6 @@ void loop() {
   if (bluetooth_enable != last_bluetooth_enable) {
     last_bluetooth_enable = bluetooth_enable;
     if (bluetooth_enable) {
-      bluetooth_enable_millis = millis();
       bt.begin(settings.device_name);
       Serial.print("Bluetooth enabled; name: ");
       Serial.print(settings.device_name);
@@ -495,11 +494,12 @@ void loop() {
         Serial.println("Bluetooth client connected.");
         PrintHelp();
       } else {
+        bluetooth_disconnected_millis = millis();
         Serial.println("Bluetooth client disconnected.");
       }
     }
     // Disable bluetooth after 10 minutes.
-    if (!bluetooth_has_client && millis() - bluetooth_enable_millis >= 600000) {
+    if (!bluetooth_has_client && millis() - bluetooth_disconnected_millis >= 600000) {
       bluetooth_enable = false;
       Serial.println("Bluetooth timeout.");
     }
