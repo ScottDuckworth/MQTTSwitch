@@ -460,8 +460,8 @@ void MQTTCallback(char* topic, byte* payload, unsigned int length) {
 }
 
 void loop() {
-  static unsigned long last_blink = 0;
-  static unsigned long blink_delay = 0;
+  static unsigned long blink_millis = 0;
+  static unsigned long blink_period = 0;
   static bool last_power_enable = power_enable;
   static bool last_bluetooth_enable = bluetooth_enable;
   static bool last_bluetooth_has_client = false;
@@ -499,22 +499,23 @@ void loop() {
     }
   }
   
-  if (EnsureWiFi()) {
-    if (EnsureMQTT()) {
-      mqtt.loop();
-      blink_delay = 5000;
-    } else {
-      blink_delay = 1000;
-    }
+  if (!EnsureWiFi()) {
+    // Blink 4 times per second if WiFi is not connected.
+    blink_period = 250;
+  } else if (!EnsureMQTT()) {
+    // Blink 1 time per second if MQTT is not connected.
+    blink_period = 1000;
   } else {
-    blink_delay = 250;
+    // Blink every 10 seconds if WiFi and MQTT are connected.
+    blink_period = 10000;
   }
 
-  if (blink_delay == 0) {
-    digitalWrite(STATUS_LED, true);
-  } else if (millis() - last_blink >= blink_delay) {
-    last_blink = millis();
-    digitalWrite(STATUS_LED, !digitalRead(STATUS_LED));
+  unsigned long blink_duration = millis() - blink_millis;
+  if (blink_duration >= blink_period) {
+    digitalWrite(STATUS_LED, 1);
+    blink_millis = millis();
+  } else if (blink_duration >= 100) {
+    digitalWrite(STATUS_LED, 0);
   }
   
   if (power_enable != last_power_enable) {
