@@ -113,7 +113,7 @@ void RestartWiFi() {
 
 void PublishStatus() {
   if (strlen(settings.mqtt_status_topic) > 0) {
-    mqtt.publish(settings.mqtt_status_topic, power_enable ? "ON" : "OFF", false);
+    mqtt.publish(settings.mqtt_status_topic, power_enable ? "ON" : "OFF", true);
   }
 }
 
@@ -165,12 +165,13 @@ bool EnsureMQTT() {
     if (strlen(id) == 0) id = settings.device_name;
     bool success;
     if (strlen(settings.mqtt_user) == 0) {
-      success = mqtt.connect(id);
+      success = mqtt.connect(id, settings.mqtt_status_topic, 1, true, "OFFLINE");
     } else {
-      success = mqtt.connect(id, settings.mqtt_user, settings.mqtt_password);
+      success = mqtt.connect(id, settings.mqtt_user, settings.mqtt_password,
+                             settings.mqtt_status_topic, 1, true, "OFFLINE");
     }
     if (success && strlen(settings.mqtt_control_topic) > 0) {
-      mqtt.subscribe(settings.mqtt_control_topic);
+      mqtt.subscribe(settings.mqtt_control_topic, 1);
     }
     return success;
   }
