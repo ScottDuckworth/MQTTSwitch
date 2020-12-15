@@ -35,8 +35,14 @@ Two MQTT topics are used:
   The main loop can be delayed for various reasons, e.g. network latency of
   the MQTT client, so it is not used for responding to the power button.
   Therefore, interrupts are used to respond to the power button.
-* Since the device can be controlled through Bluetooth, and is probably
-  subject to buffer overflows and such, it is not safe to leave on Bluetooth
-  at all times. Therefore, Bluetooth is disabled by default, and it will be
-  disabled 10 minutes after the last client disconnects. You must have
+* Since the device can be controlled through Bluetooth, and Bluetooth is
+  probably subject to buffer overflows and such, it is not safe to leave on
+  Bluetooth at all times. Therefore, Bluetooth is disabled by default, and it
+  will be disabled 10 minutes after the last client disconnects. You must have
   physical access to the power button to enable Bluetooth.
+* The device is intended to be maintenance free and left on for many years.
+  The primary means of time tracking in Arduino reports milliseconds since
+  boot as an unsigned 32-bit integer (on ESP32), which will overflow every 49
+  days. This can cause simple timestamp comparisons to break, but taking the
+  *difference* of two timestamps will work as expected. Care has been taken to
+  ensure that timestamps are handled correctly.
