@@ -57,8 +57,10 @@ void PrintHelp() {
   bt.println(" help");
   bt.println(" on");
   bt.println(" off");
+  bt.println(" status");
   bt.println(" device-name [<name>]");
   bt.println(" mqtt-server [<IPaddr>]");
+  bt.println(" mqtt-status");
   bt.println(" mqtt-port [<port>]");
   bt.println(" mqtt-id [<id>]");
   bt.println(" mqtt-auth <user> [<password>]");
@@ -219,11 +221,15 @@ void PollBluetoothCommand() {
       power_enable = true;
     } else if (strcmp(cmd, "off") == 0) {
       power_enable = false;
+    } else if (strcmp(cmd, "status") == 0) {
+      bt.println(power_enable ? "on" : "off");
     } else if (strcmp(cmd, "device-name") == 0) {
       char* name = tokenSplit(ptr);
       if (SettingsReadWriteHelper(settings.device_name, sizeof(settings.device_name), name)) {
         RestartWiFi();
       }
+    } else if (strcmp(cmd, "mqtt-status") == 0) {
+      bt.println(mqttStateString(mqtt.state()));
     } else if (strcmp(cmd, "mqtt-server") == 0) {
       char* host = tokenSplit(ptr);
       if (SettingsReadWriteHelper(settings.mqtt_server, sizeof(settings.mqtt_server), host)) {
