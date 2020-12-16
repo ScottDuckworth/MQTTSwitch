@@ -250,7 +250,8 @@ bool Setup() {
   bt.print("Connecting to WiFi... ");
   EnsureWiFi(mysettings);
   unsigned long start = millis();
-  while (bt.hasClient()) {
+  while (true) {
+    if (!bt.hasClient()) return false;
     wl_status_t status = WiFi.status();
     if (status == WL_CONNECTED) break;
     if (status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL) {
@@ -278,7 +279,8 @@ bool Setup() {
   bt.print("Connecting to MQTT server... ");
   EnsureMQTT(mysettings);
   start = millis();
-  while (bt.hasClient()) {
+  while (true) {
+    if (!bt.hasClient()) return false;
     mqtt.loop();
     int state = mqtt.state();
     if (state == MQTT_CONNECTED) break;
@@ -299,6 +301,7 @@ bool Setup() {
   bt.println("MQTT status topic:");
   BluetoothReadLine(mysettings.mqtt_status_topic, sizeof(mysettings.mqtt_status_topic));
 
+  if (!bt.hasClient()) return false;
   settings = mysettings;
   SaveSettings();
   bt.println("Settings saved!");
