@@ -272,7 +272,7 @@ bool Setup() {
   BluetoothReadLine(mysettings.mqtt_user, sizeof(mysettings.mqtt_user));
   if (strlen(mysettings.mqtt_user) > 0) {
     bt.println("MQTT password:");
-    BluetoothReadLine(mysettings.mqtt_password, sizeof(mysettings.mqtt_user));
+    BluetoothReadLine(mysettings.mqtt_password, sizeof(mysettings.mqtt_password));
   }
 
   if (!bt.hasClient()) return false;
