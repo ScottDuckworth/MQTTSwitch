@@ -10,12 +10,27 @@ to control non-smart devices with a relay.
 
 ## Setup
 
-1. Press and hold the power button for at least 5 seconds, then release. This
-   temporarily enables Bluetooth.
-2. Connect your smartphone to the Bluetooth device, initially named
+Press and hold the power button for at least 5 seconds, then release. This
+temporarily enables setup mode (it turns on Bluetooth, a WiFi access point,
+and a web server).
+
+There are two ways to setup the device: via WiFi or via Bluetooth.
+
+### Setup via WiFi
+
+1. Connect a WiFi device to the SSID named `MQTTSwitch`. (The device can be
+renamed during setup).
+2. Open a web browser and navigate to http://192.168.4.1/.
+3. Click the link to `Setup` and fill out the form to configure WiFi and MQTT.
+
+### Setup via Bluetooth 
+
+Caveat: This method doesn't seem to work on Apple's iOS.
+
+1. Connect your smartphone to the Bluetooth device, initially named
    `MQTTSwitch`. (The device can be renamed using the `device-name` command).
-3. Open a Bluetooth serial emulator on your smartphone.
-4. Enter `setup`. Follow the prompts to configure WiFi and MQTT.
+2. Open a Bluetooth serial emulator on your smartphone.
+3. Enter `setup`. Follow the prompts to configure WiFi and MQTT.
 
 ## MQTT Topics
 
