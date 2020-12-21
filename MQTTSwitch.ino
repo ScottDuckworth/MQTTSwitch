@@ -13,13 +13,16 @@
 #include <limits>
 
 #include <BluetoothSerial.h>
+#include <DNSServer.h>
 #include <EEPROM.h>
 #include <PubSubClient.h>
+#include <SPIFFS.h>
+#include <WebServer.h>
 #include <WiFi.h>
 
 #define BUTTON_PIN 15
 #define POWER_PIN 4
-#define STATUS_LED LED_BUILTIN
+#define STATUS_LED 2
 #define SETTINGS_HEADER 0xD3
 #define DEBOUNCE_MILLIS 50
 
@@ -41,8 +44,10 @@ Settings settings;
 BluetoothSerial bt;
 WiFiClient wifi_client;
 PubSubClient mqtt(wifi_client);
+WebServer web_server;
+DNSServer dns_server;
 volatile bool power_enable = false;
-volatile bool bluetooth_enable = false;
+volatile bool config_enable = false;
 unsigned long wifi_last_try;
 unsigned long mqtt_last_try;
 
@@ -240,7 +245,7 @@ bool BluetoothReadLine(char* line, size_t linesize, bool strip = true) {
 bool Setup() {
   Settings mysettings = settings;
   RestartWiFi();
-  
+
   bt.println("WiFi SSID:");
   BluetoothReadLine(mysettings.wifi_ssid, sizeof(mysettings.wifi_ssid));
   bt.println("WiFi password:");
@@ -265,7 +270,7 @@ bool Setup() {
     yield();
   }
   bt.println("Connected!");
-  
+
   bt.println("MQTT server:");
   BluetoothReadLine(mysettings.mqtt_server, sizeof(mysettings.mqtt_server));
   bt.println("MQTT user:");
@@ -286,7 +291,7 @@ bool Setup() {
     if (state == MQTT_CONNECTED) break;
     if (state == MQTT_CONNECT_FAILED || state == MQTT_CONNECT_UNAUTHORIZED) {
       bt.println("Connection failed!");
-      return false;      
+      return false;
     }
     if (millis() - start >= 30000) {
       bt.println("Timed out!");
@@ -295,7 +300,7 @@ bool Setup() {
     yield();
   }
   bt.println("Connected!");
-  
+
   bt.println("MQTT control topic:");
   BluetoothReadLine(mysettings.mqtt_control_topic, sizeof(mysettings.mqtt_control_topic));
   bt.println("MQTT status topic:");
@@ -440,8 +445,8 @@ void ButtonChangeISR() {
       button_press = false;
       unsigned long hold_millis = now - button_press_millis;
       if (hold_millis >= 5000) {
-        // Toggle Bluetooth.
-        bluetooth_enable = !bluetooth_enable;
+        // Toggle config mode.
+        config_enable = !config_enable;
       } else if (hold_millis >= DEBOUNCE_MILLIS) {
         // Toggle power.
         power_enable = !power_enable;
@@ -467,28 +472,121 @@ void MQTTCallback(char* topic, byte* payload, unsigned int length) {
   }
 }
 
+String htmlEncode(String input) {
+    String output;
+    output.reserve(input.length());
+    for(size_t pos = 0; pos != input.length(); ++pos) {
+        switch(input[pos]) {
+            case '&':  output += "&amp;";    break;
+            case '\"': output += "&quot;";   break;
+            case '\'': output += "&apos;";   break;
+            case '<':  output += "&lt;";     break;
+            case '>':  output += "&gt;";     break;
+            default:   output += input[pos]; break;
+        }
+    }
+    return output;
+}
+
+String LoadTemplate(const char* path) {
+  File f = SPIFFS.open(path);
+  if (!f) {
+    Serial.print("Error: failed to open file: ");
+    Serial.println(path);
+    return "";
+  }
+  
+  String content;
+  while (f.available()) {
+    content += static_cast<char>(f.read());
+  }
+  f.close();
+  
+  content.replace("%power_status%", power_enable ? "ON" : "OFF");
+  content.replace("%wifi_status%", wifiStatusString(WiFi.status()));
+  content.replace("%mqtt_status%", mqttStateString(mqtt.state()));
+  content.replace("%device_name%", htmlEncode(settings.device_name));
+  content.replace("%wifi_ssid%", htmlEncode(settings.wifi_ssid));
+  content.replace("%wifi_password%", htmlEncode(settings.wifi_password));
+  content.replace("%mqtt_server%", htmlEncode(settings.mqtt_server));
+  content.replace("%mqtt_port%", String(settings.mqtt_port));
+  content.replace("%mqtt_id%", htmlEncode(settings.mqtt_id));
+  content.replace("%mqtt_user%", htmlEncode(settings.mqtt_user));
+  content.replace("%mqtt_password%", htmlEncode(settings.mqtt_password));
+  content.replace("%mqtt_control_topic%", htmlEncode(settings.mqtt_control_topic));
+  content.replace("%mqtt_status_topic%", htmlEncode(settings.mqtt_status_topic));
+  return content;
+}
+
+void httpGETIndex() {
+  web_server.sendHeader("Connection", "close");
+  web_server.send(200, "text/html", LoadTemplate("/index.html"));
+}
+
+void httpGETSettings() {
+  web_server.sendHeader("Connection", "close");
+  if (web_server.arg("success") == "") {
+    web_server.send(200, "text/html", LoadTemplate("/settings.html"));
+  } else {
+    web_server.send(200, "text/html", LoadTemplate("/settings-saved.html"));
+  }
+}
+
+void httpPOSTSettings() {
+  Settings mysettings;
+  strncpy(mysettings.device_name, web_server.arg("device_name").c_str(), sizeof(mysettings.device_name));
+  strncpy(mysettings.wifi_ssid, web_server.arg("wifi_ssid").c_str(), sizeof(mysettings.wifi_ssid));
+  strncpy(mysettings.wifi_password, web_server.arg("wifi_password").c_str(), sizeof(mysettings.wifi_password));
+  strncpy(mysettings.mqtt_server, web_server.arg("mqtt_server").c_str(), sizeof(mysettings.mqtt_server));
+  mysettings.mqtt_port = atoi(web_server.arg("mqtt_port").c_str());
+  strncpy(mysettings.mqtt_id, web_server.arg("mqtt_id").c_str(), sizeof(mysettings.mqtt_id));
+  strncpy(mysettings.mqtt_user, web_server.arg("mqtt_user").c_str(), sizeof(mysettings.mqtt_user));
+  strncpy(mysettings.mqtt_password, web_server.arg("mqtt_password").c_str(), sizeof(mysettings.mqtt_password));
+  strncpy(mysettings.mqtt_control_topic, web_server.arg("mqtt_control_topic").c_str(), sizeof(mysettings.mqtt_control_topic));
+  strncpy(mysettings.mqtt_status_topic, web_server.arg("mqtt_status_topic").c_str(), sizeof(mysettings.mqtt_status_topic));
+  settings = mysettings;
+  SaveSettings();
+
+  web_server.sendHeader("Connection", "close");
+  web_server.sendHeader("Location", "/settings?success=1");
+  web_server.send(303, "text/plain", "Settings saved!");
+}
+
 void loop() {
   static unsigned long blink_millis = 0;
   static unsigned long blink_period = 0;
   static unsigned long bluetooth_disconnected_millis = 0;
   static bool last_power_enable = power_enable;
-  static bool last_bluetooth_enable = bluetooth_enable;
+  static bool last_config_enable = config_enable;
   static bool last_bluetooth_has_client = false;
 
-  if (bluetooth_enable != last_bluetooth_enable) {
-    last_bluetooth_enable = bluetooth_enable;
-    if (bluetooth_enable) {
+  if (config_enable != last_config_enable) {
+    last_config_enable = config_enable;
+    if (config_enable) {
       bt.begin(settings.device_name);
       Serial.print("Bluetooth enabled; name: ");
       Serial.print(settings.device_name);
       Serial.println(".");
+      WiFi.softAP(settings.device_name);
+      web_server.begin();
+      dns_server.start(53, "*", WiFi.softAPIP());
+      Serial.print("WiFi AP enabled; name: ");
+      Serial.print(settings.device_name);
+      Serial.print(", IP: ");
+      Serial.println(WiFi.softAPIP());
     } else {
       bt.end();
-      Serial.println("Bluetooth disabled.");
+      dns_server.stop();
+      web_server.stop();
+      WiFi.softAPdisconnect();
+      RestartWiFi();
+      Serial.println("Bluetooth, web server, and WiFi AP disabled.");
     }
   }
-  
-  if (bluetooth_enable) {
+
+  if (config_enable) {
+    dns_server.processNextRequest();
+    web_server.handleClient();
     PollBluetoothCommand();
     bool bluetooth_has_client = bt.hasClient();
     if (bluetooth_has_client != last_bluetooth_has_client) {
@@ -503,11 +601,11 @@ void loop() {
     }
     // Disable bluetooth after 10 minutes.
     if (!bluetooth_has_client && millis() - bluetooth_disconnected_millis >= 600000) {
-      bluetooth_enable = false;
-      Serial.println("Bluetooth timeout.");
+      config_enable = false;
+      Serial.println("Config timeout.");
     }
   }
-  
+
   if (!EnsureWiFi()) {
     // Blink 4 times per second if WiFi is not connected.
     blink_period = 250;
@@ -527,7 +625,7 @@ void loop() {
   } else if (blink_duration >= 100) {
     digitalWrite(STATUS_LED, 0);
   }
-  
+
   if (power_enable != last_power_enable) {
     last_power_enable = power_enable;
     digitalWrite(POWER_PIN, power_enable);
@@ -541,9 +639,9 @@ void setup() {
   pinMode(POWER_PIN, OUTPUT);
   pinMode(STATUS_LED, OUTPUT);
   attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), ButtonChangeISR, CHANGE);
-  
+
   Serial.begin(115200);
-  
+
   Settings s;
   EEPROM.begin(sizeof(s));
   EEPROM.get(0, s);
@@ -559,4 +657,11 @@ void setup() {
   // https://github.com/marvinroger/async-mqtt-client :-(.
   mqtt.setSocketTimeout(5);
   mqtt.setCallback(MQTTCallback);
+
+  if(!SPIFFS.begin()){
+     Serial.println("Error: failed to mount SPIFFS.");
+  }
+  web_server.on("/", HTTP_GET, httpGETIndex);
+  web_server.on("/settings", HTTP_GET, httpGETSettings);
+  web_server.on("/settings", HTTP_POST, httpPOSTSettings);
 }
