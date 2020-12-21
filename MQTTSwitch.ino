@@ -568,6 +568,7 @@ void loop() {
       Serial.print(settings.device_name);
       Serial.println(".");
       WiFi.softAP(settings.device_name);
+      WiFi.softAPConfig(WiFi.softAPIP(), WiFi.softAPIP(), IPAddress(255, 255, 255, 0));
       web_server.begin();
       dns_server.start(53, "*", WiFi.softAPIP());
       Serial.print("WiFi AP enabled; name: ");
