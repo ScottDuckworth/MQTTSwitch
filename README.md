@@ -61,3 +61,22 @@ Two MQTT topics are used:
   days. This can cause simple timestamp comparisons to break, but taking the
   *difference* of two timestamps will work as expected. Care has been taken to
   ensure that timestamps are handled correctly.
+
+## Uploading to an ESP32
+
+The compiled code occupies a little over 1.3MB of program storage space. This
+is just enough to exceed the default partition size for the typical ESP32 with
+4MB of flash, so the partition scheme must be changed. Additionally, the code
+does use a small amount of flash for SPIFFS, which must be uploaded separately
+from the code, and must be accounted for in the flash partitioning.
+
+If the code will not fit in your board, try this:
+
+1. Select board `ESP32 Dev Module`.
+2. Select partition scheme `Minimal SPIFFS`, which provides 1.9MB APP storage
+   and 190KB SPIFFS storage.
+
+To upload the required data to SPIFFS storage, you must first install the
+<a href="https://github.com/me-no-dev/arduino-esp32fs-plugin">Arduino ESP32
+filesystem uploader</a> plugin. Upload the data through the `Tools -> ESP32
+Sketch Data Upload` menu item.
